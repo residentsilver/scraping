@@ -502,26 +502,70 @@ class GreenScraper:
                 # (更新) 新しい DOM 構造に合わせてリンク要素を取得
                 job_links = self.wait.until(
                     EC.presence_of_all_elements_located((By.CSS_SELECTOR,
-                        "#__next > div.MuiBox-root.css-0 > div > div.css-1t1ayi5 > div.MuiBox-root.css-13vg3tq > div > a"
+                        "#__next > div.MuiBox-root[class*='css-'] > div > div[class*='css-'] > div.MuiBox-root[class*='css-'] > div > a"
                     ))
                 )
                 logger.info(f"{len(job_links)}件の求人リンクが見つかりました")
                 
-                for i, link in enumerate(job_links):
+                # 各求人リンクのURLを事前に取得して保存
+                job_urls = []
+                for link in job_links:
                     try:
-                        logger.info(f"求人 {i+1}/{len(job_links)} の情報を取得中...")
-                        
-                        # リンク要素から URL とテキストを取得
                         job_url = link.get_attribute("href")
-                        company_name = link.text.strip()
+                        job_urls.append(job_url)
+                    except Exception as e:
+                        logger.warning(f"求人URLの取得中にエラー: {str(e)}")
+                
+                logger.info(f"取得したURL数: {len(job_urls)}")
+                logger.info(f"取得したURL: {job_urls}")
+                
+                
+                # 各リンクに対応する給与情報を取得する準備
+                job_salaries = []
+                try:
+                    # XPathを使って各求人カードの給与情報を取得
+                    for i in range(1, len(job_urls) + 1):
+                        try:
+                            # 提供されたXPathパターンを使用
+                            xpath = f"/html/body/div[1]/div[1]/div/div[1]/div[{i}]/div/a/div[2]/div[2]/div[1]/span"
+                            
+                            # 要素の取得を試みる
+                            salary_elems = self.driver.find_elements(By.XPATH, xpath)
+                            
+                            if salary_elems and len(salary_elems) > 0:
+                                salary_text = salary_elems[0].text.strip()
+                                # 「円」が含まれる値のみを追加
+                                if "円" in salary_text:
+                                    job_salaries.append(salary_text)
+                                    logger.info(f"求人 {i} の給与情報: {salary_text}")
+                                else:
+                                    job_salaries.append("")
+                                    logger.info(f"求人 {i} の給与情報に「円」が含まれていないためスキップ")
+                            else:
+                                job_salaries.append("")
+                                logger.warning(f"求人 {i} の給与情報要素が見つかりませんでした")
+                        except Exception as e:
+                            job_salaries.append("")
+                            logger.warning(f"求人 {i} の給与情報取得中にエラー: {str(e)}")
+                    
+                    logger.info(f"取得した給与情報数: {len(job_salaries)}")
+                except Exception as e:
+                    logger.warning(f"給与情報の取得に失敗: {str(e)}")
+                
+                # URLごとに詳細ページにアクセスして情報を取得
+                for i, job_url in enumerate(job_urls):
+                    try:
+                        logger.info(f"求人 {i+1}/{len(job_urls)} の情報を取得中...")
                         
-                        # （必要に応じて）リンク内の詳細情報を取得
-                        detail_items = link.find_elements(By.CSS_SELECTOR, ".card-info__detail-item")
-                        
+                        # 求人詳細ページに遷移
+                        self.driver.get(job_url)
+                        # ページ読み込みのために3秒待機
+                        time.sleep(3)
+
                         # 各項目の初期化
                         job_data = {
-                            "企業名": company_name,
-                            "給与": "",
+                            "企業名": "",
+                            "給与": job_salaries[i] if i < len(job_salaries) else "",  # 給与情報を事前に取得した値から割り当て
                             "勤務地": "",
                             "時間": "",
                             "働き方": "",
@@ -534,9 +578,9 @@ class GreenScraper:
                             "掲載ページ": job_url,
                             "社員数": "",
                             "設立年数": "",
-                            "採用予定": "",
+                            "採用人数": "",
                             "希望度": "",
-                            "応募": "",
+                            "応募資格": "",
                             "結果": "",
                             "HPの作りこみ": "",
                             "転職会議の点数": "",
@@ -544,33 +588,38 @@ class GreenScraper:
                             "▼働き方特徴": ""
                         }
                         
-                        # 各項目の情報を取得
-                        for item in detail_items:
-                            try:
-                                item_text = item.text
-                                
-                                if "給与" in item_text:
-                                    job_data["給与"] = item_text.replace("給与：", "").strip()
-                                elif "勤務地" in item_text:
-                                    job_data["勤務地"] = item_text.replace("勤務地：", "").strip()
-                                elif "時間" in item_text:
-                                    job_data["時間"] = item_text.replace("時間：", "").strip()
-                                elif "働き方" in item_text:
-                                    job_data["働き方"] = item_text.replace("働き方：", "").strip()
-                                
-                                # 言語情報の取得（タグから）
-                                language_tags = card.find_elements(By.CSS_SELECTOR, ".card-tag__item")
-                                languages = [tag.text for tag in language_tags]
-                                job_data["利用言語"] = ", ".join(languages)
-                                
-                            except Exception as e:
-                                logger.warning(f"項目の取得中にエラー: {str(e)}")
+                        # 詳細情報を取得するロジックを試行
+                        try:
+                            # 詳細項目を取得
+                            detail_items = self.driver.find_elements(By.CSS_SELECTOR, 
+                                "#__next > div.MuiBox-root[class*='css-'] > div > div.MuiContainer-root[class*='css-'] > div > div > div > div[class*='css-'] > div")
+                            
+                            # DOM構造を確認し、該当する詳細情報を取得
+                            for item in detail_items:
+                                try:
+                                    item_text = item.text
+                                    
+                                    if "勤務地" in item_text:
+                                        job_data["勤務地"] = item_text.replace("勤務地：", "").strip()
+                                    elif "時間" in item_text:
+                                        job_data["時間"] = item_text.replace("時間：", "").strip()
+                                    elif "働き方" in item_text:
+                                        job_data["働き方"] = item_text.replace("働き方：", "").strip()
+                                    
+                                    # 言語情報の取得（タグから）
+                                    language_tags = self.driver.find_elements(By.CSS_SELECTOR, ".card-tag__item")
+                                    if language_tags:
+                                        languages = [tag.text for tag in language_tags]
+                                        job_data["利用言語"] = ", ".join(languages)
+                                except Exception as e:
+                                    logger.warning(f"詳細項目の取得中にエラー: {str(e)}")
+                        except Exception as e:
+                            logger.warning(f"詳細項目の全体取得に失敗: {str(e)}")
                         
                         # 詳細ページへアクセスして追加情報を取得
                         self.get_detailed_info(job_url, job_data)
                         
                         all_job_data.append(job_data)
-                        logger.info(f"求人 {i+1} の情報取得が完了しました: {company_name}")
                         
                     except Exception as e:
                         logger.error(f"求人 {i+1} の処理中にエラーが発生しました: {str(e)}")
@@ -601,112 +650,232 @@ class GreenScraper:
             job_data (dict): 更新する求人データの辞書
         """
         try:
-            # 現在のウィンドウハンドルを保存
-            current_window = self.driver.current_window_handle
+            # 現在のURLを保存
+            current_url = self.driver.current_url
             
-            # 新しいタブで詳細ページを開く
-            self.driver.execute_script(f"window.open('{job_url}');")
+            # 同じタブで詳細ページにアクセス（新しいタブを開かない）
+            logger.info(f"詳細ページにアクセス: {job_url}")
+            self.driver.get(job_url)
             
-            # 新しいタブに切り替え
-            self.driver.switch_to.window(self.driver.window_handles[-1])
-            
-            # ページの読み込みを待機
+            # ページ読み込みのために待機
             self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "body")))
             
-            try:
-                # 会社情報セクションを取得
-                company_info = self.driver.find_elements(By.CSS_SELECTOR, ".job-offer-company-details__list-item")
-                
-                for info in company_info:
-                    try:
-                        info_text = info.text
+            # try:
+            #     # 会社情報セクションを取得
+            #     company_info = self.driver.find_elements(By.CSS_SELECTOR, ".job-offer-company-details__list-item")
+            #     logger.info(f"会社情報セクション: {company_info}")
+            #     for info in company_info:
+            #         try:
+            #             info_text = info.text
                         
-                        if "社員数" in info_text:
-                            job_data["社員数"] = info_text.replace("社員数", "").strip()
-                        elif "設立年" in info_text or "創業" in info_text:
-                            job_data["設立年数"] = info_text.strip()
-                        elif "平均年齢" in info_text:
-                            job_data["平均年齢"] = info_text.replace("平均年齢", "").strip()
-                        elif "残業時間" in info_text:
-                            job_data["平均残業"] = info_text.replace("平均残業時間", "").strip()
-                        elif "休日日数" in info_text:
-                            job_data["休日日数"] = info_text.replace("年間休日日数", "").strip()
-                        elif "みなし残業" in info_text:
-                            job_data["みなし残業"] = info_text.replace("みなし残業", "").strip()
-                    except Exception as e:
-                        logger.warning(f"会社情報項目の処理中にエラー: {str(e)}")
+            #             if "社員数" in info_text:
+            #                 job_data["社員数"] = info_text.replace("社員数", "").strip()
+            #             elif "設立年" in info_text or "創業" in info_text:
+            #                 job_data["設立年数"] = info_text.strip()
+            #             elif "平均年齢" in info_text:
+            #                 job_data["平均年齢"] = info_text.replace("平均年齢", "").strip()
+            #             elif "残業時間" in info_text:
+            #                 job_data["平均残業"] = info_text.replace("平均残業時間", "").strip()
+            #             elif "休日日数" in info_text:
+            #                 job_data["休日日数"] = info_text.replace("年間休日日数", "").strip()
+            #             elif "みなし残業" in info_text:
+            #                 job_data["みなし残業"] = info_text.replace("みなし残業", "").strip()
+            #         except Exception as e:
+            #             logger.warning(f"会社情報項目の処理中にエラー: {str(e)}")
                 
-                # 求人要件情報の取得
-                requirements = self.driver.find_elements(By.CSS_SELECTOR, ".job-offer-requirements__box")
+            #     # 求人要件情報の取得
+            #     requirements = self.driver.find_elements(By.CSS_SELECTOR, ".job-offer-requirements__box")
                 
-                for req in requirements:
-                    try:
-                        req_title = req.find_element(By.CSS_SELECTOR, ".job-offer-requirements__label").text
-                        req_content = req.find_element(By.CSS_SELECTOR, ".job-offer-requirements__content").text
+            #     for req in requirements:
+            #         try:
+            #             req_title = req.find_element(By.CSS_SELECTOR, ".job-offer-requirements__label").text
+            #             req_content = req.find_element(By.CSS_SELECTOR, ".job-offer-requirements__content").text
                         
-                        if "必須経験" in req_title or "必要経験" in req_title:
-                            job_data["実務経験"] = req_content.strip()
+            #             if "必須経験" in req_title or "必要経験" in req_title:
+            #                 job_data["実務経験"] = req_content.strip()
+            #         except Exception as e:
+            #             logger.warning(f"求人要件項目の処理中にエラー: {str(e)}")
+                
+
+            # except Exception as e:
+            #     logger.warning(f"詳細情報取得中にエラー: {str(e)}")
+
+            # 詳細ページから必要な情報を取得（get_field_valueメソッドを使用）
+            try:
+                # 企業名取得（詳細ページから取得するとより正確）
+                company_name = self.get_field_value("企業名")
+                if company_name:
+                    job_data["企業名"] = company_name
+                else:
+                    # 複数の方法で企業名を取得（バックアップ）
+                    try:
+                        company_elem = self.driver.find_element(
+                            By.CSS_SELECTOR,
+                            "#__next > div.MuiBox-root[class*='css-'] div[class*='MuiContainer-root'] aside div[class*='MuiCard-root'] a div[class*='MuiCardContent-root'] h6"
+                        )
+                        job_data["企業名"] = company_elem.text.strip()
                     except Exception as e:
-                        logger.warning(f"求人要件項目の処理中にエラー: {str(e)}")
+                        logger.warning(f"企業名要素の取得に失敗: {e}")
+                
+                # 各情報の取得
+                if not job_data["給与"]:
+                    salary = self.get_field_value("年収")
+                    if salary and "円" in salary:
+                        job_data["給与"] = salary
+                
+                if not job_data["勤務地"]:
+                    location = self.get_field_value("勤務地")
+                    if location:
+                        job_data["勤務地"] = location
+                
+                work_time = self.get_field_value("勤務時間")
+                if work_time:
+                    job_data["時間"] = work_time
+
+                holiday = self.get_field_value("休日・休暇")
+                if holiday:
+                    job_data["休日日数"] = holiday
+
+                benefits = self.get_field_value("待遇・福利厚生")
+                if benefits:
+                    job_data["待遇・福利厚生"] = benefits
+                
+                work_style = self.get_field_value("働き方")
+                if work_style:
+                    job_data["働き方"] = work_style
+
+                number_of_employees = self.get_field_value("採用人数")
+                if number_of_employees:
+                    job_data["採用人数"] = number_of_employees
+                
+                application_qualification = self.get_field_value("応募資格")
+                if application_qualification:
+                    job_data["応募資格"] = application_qualification
+                
+                try:
+                    # 指定されたXPathを使用して利用言語を取得
+                    xpath = "//*[@id=\"__next\"]/div[1]/div/div[1]/div/div/div/div[1]/div[3]/div[4]/span"
+                    language_elems = self.driver.find_elements(By.XPATH, xpath)
+                    
+                    if language_elems and len(language_elems) > 0:
+                        # 複数の言語要素がある場合は結合
+                        languages = [elem.text.strip() for elem in language_elems if elem.text.strip()]
+                        if languages:
+                            job_data["利用言語"] = ", ".join(languages)
+                            logger.info(f"XPathで取得した利用言語: {job_data['利用言語']}")
+                except Exception as e:
+                    logger.warning(f"XPathによる利用言語取得中にエラー: {str(e)}")
                 
             except Exception as e:
-                logger.warning(f"詳細情報取得中にエラー: {str(e)}")
-
-            # ―――― 追加: 詳細ページから企業名、給与、勤務地を取得 ――――
-            try:
-                # 企業名取得（新しいDOM構造）
-                detail_company_name = self.driver.find_element(
-                    By.CSS_SELECTOR,
-                    "#__next > div.MuiBox-root.css-0 > div > div.MuiContainer-root.MuiContainer-maxWidthMd.MuiContainer-disableGutters.css-2hiy9a > div > div > aside > div.MuiPaper-root.MuiPaper-outlined.MuiPaper-rounded.MuiCard-root.css-1sbkbfv > a > div.MuiCardContent-root.css-1qw96cp > h6"
-                ).text.strip()
-                job_data["企業名"] = detail_company_name
-            except Exception as e:
-                logger.warning(f"詳細ページの企業名取得に失敗: {e}")
-
-            try:
-                # 年収ラベル確認
-                label_salary = self.driver.find_element(
-                    By.CSS_SELECTOR,
-                    "#__next > div.MuiBox-root.css-0 > div > div.MuiContainer-root.MuiContainer-maxWidthMd.MuiContainer-disableGutters.css-2hiy9a > div > div > div > div.css-78jar2 > div:nth-child(4) > p.MuiTypography-root.MuiTypography-body2.css-1r6p42g"
-                )
-                if "年収" in label_salary.text:
-                    salary_elem = self.driver.find_element(
+                logger.warning(f"get_field_valueによる詳細情報取得中にエラー: {str(e)}")
+                
+                # フォールバック：旧手法で情報を取得
+                try:
+                    # 企業名取得（新しいDOM構造）
+                    detail_company_name = self.driver.find_element(
                         By.CSS_SELECTOR,
-                        "#__next > div.MuiBox-root.css-0 > div > div.MuiContainer-root.MuiContainer-maxWidthMd.MuiContainer-disableGutters.css-2hiy9a > div > div > div > div.css-78jar2 > div:nth-child(8) > p.MuiTypography-root.MuiTypography-body2.MuiTypography-alignJustify.css-abo7h2"
-                    )
-                    job_data["給与"] = salary_elem.text.strip()
-            except Exception as e:
-                logger.warning(f"給与取得中にエラー: {e}")
+                        "#__next > div.MuiBox-root[class*='css-'] div[class*='MuiContainer-root'] aside div[class*='MuiCard-root'] a div[class*='MuiCardContent-root'] h6"
+                    ).text.strip()
+                    if detail_company_name and not job_data["企業名"]:
+                        job_data["企業名"] = detail_company_name
+                except Exception as e:
+                    logger.warning(f"詳細ページの企業名取得に失敗: {e}")
 
+                # try:
+                #     # 年収ラベル確認
+                #     label_salary = self.driver.find_element(
+                #         By.CSS_SELECTOR,
+                #         "#__next > div.MuiBox-root[class*='css-'] > div > div.MuiContainer-root.MuiContainer-maxWidthMd.MuiContainer-disableGutters[class*='css-'] > div > div > div > div[class*='css-'] > div:nth-child(4) > p.MuiTypography-root.MuiTypography-body2[class*='css-']"
+                #     )
+                #     if "年収" in label_salary.text and not job_data["給与"]:
+                #         salary_elem = self.driver.find_element(
+                #             By.CSS_SELECTOR,
+                #             "#__next > div.MuiBox-root[class*='css-'] > div > div.MuiContainer-root.MuiContainer-maxWidthMd.MuiContainer-disableGutters[class*='css-'] > div > div > div > div[class*='css-'] > div:nth-child(8) > p.MuiTypography-root.MuiTypography-body2.MuiTypography-alignJustify[class*='css-']"
+                #         )
+                #         job_data["給与"] = salary_elem.text.strip()
+                # except Exception as e:
+                #     logger.warning(f"給与取得中にエラー: {e}")
+
+                # try:
+                #     # 勤務地ラベル確認
+                #     label_location = self.driver.find_element(
+                #         By.CSS_SELECTOR,
+                #         "#__next > div.MuiBox-root[class*='css-'] > div > div.MuiContainer-root.MuiContainer-maxWidthMd.MuiContainer-disableGutters[class*='css-'] > div > div > div > div[class*='css-'] > div:nth-child(11) > p.MuiTypography-root.MuiTypography-body2.MuiTypography-alignJustify[class*='css-']"
+                #     )
+                #     if "勤務地" in label_location.text and not job_data["勤務地"]:
+                #         loc_elem = self.driver.find_element(
+                #             By.CSS_SELECTOR,
+                #             "#__next > div.MuiBox-root[class*='css-'] > div > div.MuiContainer-root.MuiContainer-maxWidthMd.MuiContainer-disableGutters[class*='css-'] > div > div > div > div[class*='css-'] > div:nth-child(11) > p.MuiTypography-root.MuiTypography-body2.MuiTypography-alignJustify[class*='css-']"
+                #         )
+                #         job_data["勤務地"] = loc_elem.text.strip()
+                # except Exception as e:
+                #     logger.warning(f"勤務地取得中にエラー: {e}")
+
+            # 会社情報の取得
+            # 会社情報のリンクを取得して遷移
             try:
-                # 勤務地ラベル確認
-                label_location = self.driver.find_element(
-                    By.CSS_SELECTOR,
-                    "#__next > div.MuiBox-root.css-0 > div > div.MuiContainer-root.MuiContainer-maxWidthMd.MuiContainer-disableGutters.css-2hiy9a > div > div > div > div.css-78jar2 > div:nth-child(11) > p.MuiTypography-root.MuiTypography-body2.css-1r6p42g"
-                )
-                if "勤務地" in label_location.text:
-                    loc_elem = self.driver.find_element(
-                        By.CSS_SELECTOR,
-                        "#__next > div.MuiBox-root.css-0 > div > div.MuiContainer-root.MuiContainer-maxWidthMd.MuiContainer-disableGutters.css-2hiy9a > div > div > div > div.css-78jar2 > div:nth-child(11) > p.MuiTypography-root.MuiTypography-body2.MuiTypography-alignJustify.css-abo7h2"
-                    )
-                    job_data["勤務地"] = loc_elem.text.strip()
-            except Exception as e:
-                logger.warning(f"勤務地取得中にエラー: {e}")
-            # ―――― 追加ここまで ――――
+                # 指定されたXPathを持つaリンクを探す
+                company_link = self.driver.find_element(By.XPATH, "/html/body/div[1]/header/div[3]/div[2]/nav/div/div/a[1]")
+                
+                # リンクのテキストを取得
+                link_text = company_link.text.strip()
+                logger.info(f"取得したリンクのテキスト: {link_text}")
+                
+                # リンクをクリックして遷移
+                company_link.click()
+                
+                # ページ遷移後に待機
+                time.sleep(2)
+                
+                logger.info("会社情報ページに遷移しました")
 
-            # 元のタブに戻る
-            self.driver.close()
-            self.driver.switch_to.window(current_window)
+                # 会社情報ページのデータを取得
+                try:
+                    # 設立年数の取得
+                    establishment_years_elem = self.driver.find_element(By.XPATH, "/html/body/div[1]/div[1]/div/div[2]/div[2]/div/div[6]/div/p")
+                    job_data["設立年数"] = establishment_years_elem.text.strip()
+                    logger.info(f"設立年数: {job_data['設立年数']}")
+                except Exception as e:
+                    logger.warning(f"設立年数の取得中にエラーが発生しました: {str(e)}")
+                    job_data["設立年数"] = ""
+
+                # 社員数の取得
+                try:
+                    # 社員数の要素を取得
+                    employee_count_elem = self.driver.find_element(By.XPATH, "//*[@id='__next']/div[1]/div/div[2]/div[2]/div/div[11]/div/p")
+                    job_data["社員数"] = employee_count_elem.text.strip()
+                    logger.info(f"社員数: {job_data['社員数']}")
+                except Exception as e:
+                    logger.warning(f"社員数の取得中にエラーが発生しました: {str(e)}")
+                    job_data["社員数"] = ""
+                
+                # 平均年齢の取得
+                try:
+                    # 平均年齢の要素を取得
+                    average_age_elem = self.driver.find_element(By.XPATH, "/html/body/div[1]/div[1]/div/div[2]/div[2]/div/div[12]/div/p")
+                    job_data["平均年齢"] = average_age_elem.text.strip()
+                    logger.info(f"平均年齢: {job_data['平均年齢']}")
+                except Exception as e:
+                    logger.warning(f"平均年齢の取得中にエラーが発生しました: {str(e)}")
+                    job_data["平均年齢"] = ""
+                
+            except Exception as e:
+                logger.warning(f"会社情報ページへの遷移中にエラーが発生しました: {str(e)}")
+            
+            # 元のページに戻る
+            logger.info(f"元のURLに戻ります: {current_url}")
+            self.driver.get(current_url)
+            time.sleep(2)  # ページ遷移のための待機
             
         except Exception as e:
             logger.error(f"詳細ページのアクセス中にエラーが発生しました: {str(e)}")
-            # エラーが発生しても元のタブに戻るように試みる
             try:
-                if len(self.driver.window_handles) > 1:
-                    self.driver.close()
-                    self.driver.switch_to.window(current_window)
+                # エラー回復：お気に入りページに戻る
+                logger.info("エラー回復：お気に入りページに戻ります")
+                self.driver.get(self.favorites_url)
+                time.sleep(3)  # ページ読み込みのために待機
             except:
-                pass
+                logger.error("回復失敗：ブラウザセッションが無効です")
     
     def save_to_excel(self, data):
         """
@@ -761,13 +930,57 @@ class GreenScraper:
             last_height = new_height
         logger.warning(f"最大スクロール回数({max_scrolls})に到達しました")
 
+    def get_field_value(self, field_name):
+        """フィールド名から値を柔軟に取得する"""
+        try:
+            # フィールド名を含むラベル要素を検索
+            labels = self.driver.find_elements(By.CSS_SELECTOR, "p[class*='css-']")
+            for label in labels:
+                if field_name in label.text:
+                    # 親要素を取得
+                    parent = label.find_element(By.XPATH, "./..")
+                    # 親要素内の値を持つ要素を取得（通常2番目のp要素）
+                    value_elem = parent.find_elements(By.TAG_NAME, "p")[1]
+                    return value_elem.text.strip()
+            return ""
+        except Exception as e:
+            logger.warning(f"{field_name}の取得中にエラー: {e}")
+            return ""
+
 def main():
     """メイン実行関数"""
     scraper = GreenScraper()
     
     try:
-        # ログイン
-        use_google = input("Google アカウントでログインしますか？ (y/n): ").strip().lower() == 'y'
+        # ログイン方法の設定
+        use_google = False
+        
+        # 標準入力からの入力が不要な場合はconfigファイルから自動判定
+        if HAS_CONFIG:
+            # Google認証情報の確認
+            has_google_auth = (
+                hasattr(config, 'GOOGLE_EMAIL') and config.GOOGLE_EMAIL and 
+                hasattr(config, 'GOOGLE_PASSWORD') and config.GOOGLE_PASSWORD
+            )
+            # Green Japan認証情報の確認
+            has_green_auth = (
+                hasattr(config, 'EMAIL') and config.EMAIL and 
+                hasattr(config, 'PASSWORD') and config.PASSWORD
+            )
+            
+            # 認証情報の優先度に基づいて判断
+            if has_google_auth:
+                logger.info("Google認証情報が設定されているため、Googleログインを使用します")
+                use_google = True
+            elif has_green_auth:
+                logger.info("Green Japan認証情報が設定されているため、通常ログインを使用します")
+            else:
+                # 両方未設定の場合は入力を求める
+                use_google = input("Google アカウントでログインしますか？ (y/n): ").strip().lower() == 'y'
+        else:
+            # configファイルがない場合は入力を求める
+            use_google = input("Google アカウントでログインしますか？ (y/n): ").strip().lower() == 'y'
+        
         if scraper.login(use_google=use_google):
             # お気に入りページのスクレイピング
             job_data = scraper.scrape_favorites()
