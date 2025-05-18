@@ -555,6 +555,8 @@ class GreenScraper:
                 # URLごとに詳細ページにアクセスして情報を取得
                 for i, job_url in enumerate(job_urls):
                     try:
+                        if i >= 2:
+                            break  
                         logger.info(f"求人 {i+1}/{len(job_urls)} の情報を取得中...")
                         
                         # 求人詳細ページに遷移
@@ -830,35 +832,36 @@ class GreenScraper:
                 logger.info("会社情報ページに遷移しました")
 
                 # 会社情報ページのデータを取得
-                try:
-                    # 設立年数の取得
-                    establishment_years_elem = self.driver.find_element(By.XPATH, "/html/body/div[1]/div[1]/div/div[2]/div[2]/div/div[6]/div/p")
-                    job_data["設立年数"] = establishment_years_elem.text.strip()
-                    logger.info(f"設立年数: {job_data['設立年数']}")
-                except Exception as e:
-                    logger.warning(f"設立年数の取得中にエラーが発生しました: {str(e)}")
-                    job_data["設立年数"] = ""
+            #     try:
+            #         # 設立年数の取得
+            #         establishment_years_elem = self.driver.find_element(By.XPATH, "/html/body/div[1]/div[1]/div/div[2]/div[2]/div/div[6]/div/p")
+            #         job_data["設立年数"] = establishment_years_elem.text.strip()
+            #         logger.info(f"設立年数: {job_data['設立年数']}")
+            #     except Exception as e:
+            #         logger.warning(f"設立年数の取得中にエラーが発生しました: {str(e)}")
+            #         job_data["設立年数"] = ""
 
-                # 社員数の取得
-                try:
-                    # 社員数の要素を取得
-                    employee_count_elem = self.driver.find_element(By.XPATH, "//*[@id='__next']/div[1]/div/div[2]/div[2]/div/div[11]/div/p")
-                    job_data["社員数"] = employee_count_elem.text.strip()
-                    logger.info(f"社員数: {job_data['社員数']}")
-                except Exception as e:
-                    logger.warning(f"社員数の取得中にエラーが発生しました: {str(e)}")
-                    job_data["社員数"] = ""
+            #     # 社員数の取得
+            #     try:
+            #         # 社員数の要素を取得
+            #         employee_count_elem = self.driver.find_element(By.XPATH, "//*[@id='__next']/div[1]/div/div[2]/div[2]/div/div[11]/div/p")
+            #         job_data["社員数"] = employee_count_elem.text.strip()
+            #         logger.info(f"社員数: {job_data['社員数']}")
+            #     except Exception as e:
+            #         logger.warning(f"社員数の取得中にエラーが発生しました: {str(e)}")
+            #         job_data["社員数"] = ""
                 
-                # 平均年齢の取得
-                try:
-                    # 平均年齢の要素を取得
-                    average_age_elem = self.driver.find_element(By.XPATH, "/html/body/div[1]/div[1]/div/div[2]/div[2]/div/div[12]/div/p")
-                    job_data["平均年齢"] = average_age_elem.text.strip()
-                    logger.info(f"平均年齢: {job_data['平均年齢']}")
-                except Exception as e:
-                    logger.warning(f"平均年齢の取得中にエラーが発生しました: {str(e)}")
-                    job_data["平均年齢"] = ""
-                
+            #     # 平均年齢の取得
+            #     try:
+            #         # 平均年齢の要素を取得
+            #         average_age_elem = self.driver.find_element(By.XPATH, "/html/body/div[1]/div[1]/div/div[2]/div[2]/div/div[12]/div/p")
+            #         job_data["平均年齢"] = average_age_elem.text.strip()
+            #         logger.info(f"平均年齢: {job_data['平均年齢']}")
+            #     except Exception as e:
+            #         logger.warning(f"平均年齢の取得中にエラーが発生しました: {str(e)}")
+            #         job_data["平均年齢"] = ""
+                job_data = self.get_company_info(job_data)
+                logger.info(f"会社情報: {job_data}")
             except Exception as e:
                 logger.warning(f"会社情報ページへの遷移中にエラーが発生しました: {str(e)}")
             
@@ -947,6 +950,60 @@ class GreenScraper:
             logger.warning(f"{field_name}の取得中にエラー: {e}")
             return ""
 
+    def get_company_info(self, job_data):
+        """
+        会社情報ページから情報を柔軟に取得する
+        固定XPathではなく、ラベルテキストを元に情報を特定
+        
+        Args:
+            job_data (dict): 更新する求人データ辞書
+        
+        Returns:
+            dict: 更新された求人データ辞書
+        """
+        try:
+            # 基本コンテナXPath
+            base_container = "/html/body/div[1]/div[1]/div/div[2]/div[2]/div"
+            
+            # コンテナ内の全div要素を取得
+            container_divs = self.driver.find_elements(By.XPATH, f"{base_container}/div")
+            logger.info(f"コンテナ内のdiv要素数: {len(container_divs)}")
+            
+            # すべてのdiv要素を処理 （ラベル／値を改行で分割して抽出）
+            for i, div in enumerate(container_divs):
+                div_text = div.text.strip()
+                logger.info(f"div[{i}] テキスト: {div_text}")
+                
+                # 改行で分割
+                lines = div_text.split('\n')
+                if len(lines) < 2:
+                    continue
+                
+                label = lines[0].strip()
+                value = '\n'.join(lines[1:]).strip()
+                
+                # ラベルに応じて job_data を更新
+                if "設立" in label:
+                    job_data["設立年数"] = value
+                    logger.info(f"設立年数を格納: {value}")
+                    continue
+                if "社員数" in label or "従業員数" in label:
+                    job_data["社員数"] = value
+                    logger.info(f"社員数を格納: {value}")
+                    continue
+                if "平均年齢" in label:
+                    job_data["平均年齢"] = value
+                    logger.info(f"平均年齢を格納: {value}")
+                    continue
+            
+            # （必要であればこれまでのSVGアイコン検索やバックアップ処理を後段に残します）
+            
+            logger.info(f"最終取得情報: 設立年数={job_data.get('設立年数','未取得')}, 社員数={job_data.get('社員数','未取得')}, 平均年齢={job_data.get('平均年齢','未取得')}")
+            return job_data
+            
+        except Exception as e:
+            logger.error(f"会社情報の取得中にエラー: {e}")
+            return job_data
 def main():
     """メイン実行関数"""
     scraper = GreenScraper()
