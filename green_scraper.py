@@ -497,7 +497,7 @@ class GreenScraper:
                 logger.info("お気に入りページにアクセスしています...")
                 self.driver.get(self.favorites_url)
                 # 動的ロード対応: ページ最下部までスクロールして全件読み込む
-                self.infinite_scroll(scroll_pause_time=1.0, max_scrolls=100)
+                self.infinite_scroll(scroll_pause_time=2.0, max_scrolls=100)
                 
                 # (更新) 新しい DOM 構造に合わせてリンク要素を取得
                 job_links = self.wait.until(
@@ -581,13 +581,12 @@ class GreenScraper:
                             "社員数": "",
                             "設立年数": "",
                             "採用人数": "",
-                            "希望度": "",
-                            "応募資格": "",
-                            "結果": "",
-                            "HPの作りこみ": "",
-                            "転職会議の点数": "",
-                            "ライトハウス": "",
-                            "▼働き方特徴": ""
+                            "希望度": "個別で記入",
+                            "応募資格": "個別で記入",
+                            "結果": "個別で記入",
+                            "HPの作りこみ": "個別で記入",
+                            "転職会議の点数": "個別で記入",
+                            "ライトハウス": "個別で記入",
                         }
                         
                         # 詳細情報を取得するロジックを試行
