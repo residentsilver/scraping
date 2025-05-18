@@ -26,6 +26,7 @@ import logging
 import getpass
 from selenium.webdriver.common.keys import Keys
 import requests
+import re  # 正規表現を使用するために追加
 
 try:
     import config  # 設定ファイルをインポート
@@ -555,8 +556,9 @@ class GreenScraper:
                 # URLごとに詳細ページにアクセスして情報を取得
                 for i, job_url in enumerate(job_urls):
                     try:
-                        if i >= 2:
-                            break  
+                        # ループ回数の制御
+                        # if i >= 4:
+                        #     break  
                         logger.info(f"求人 {i+1}/{len(job_urls)} の情報を取得中...")
                         
                         # 求人詳細ページに遷移
@@ -581,8 +583,10 @@ class GreenScraper:
                             "社員数": "",
                             "設立年数": "",
                             "採用人数": "",
+                            "応募資格": "",
+                            "必須資格": "",
+                            "歓迎資格": "",
                             "希望度": "個別で記入",
-                            "応募資格": "個別で記入",
                             "結果": "個別で記入",
                             "HPの作りこみ": "個別で記入",
                             "転職会議の点数": "個別で記入",
@@ -642,6 +646,51 @@ class GreenScraper:
         # DataFrameに変換
         return pd.DataFrame(all_job_data)
     
+    def parse_requirements(self, raw_text: str) -> tuple:
+        """
+        応募資格テキストから必須資格と歓迎資格を抽出する
+        @param raw_text: 応募資格の生テキスト
+        @return: (必須資格, 歓迎資格)
+        """
+        # ──── 「必須要件」ヘッダー候補 ────
+        # ◆必須要件
+        # 【必須…】（【必須（MUST）】など）
+        # ■必須スキル
+        # ■必須要件■（パターン３）
+        # 【MUST】
+        must_pattern = re.search(
+            r"(?:"
+              r"◆必.*?"
+              r"|【必.*?】"
+              r"|■必.*?"
+              r"|【MUST】"
+            r")"
+            r"([\s\S]*?)(?=◆|【|■|$)",
+            raw_text
+        )
+
+        # ──── 「歓迎要件」ヘッダー候補 ────
+        # ◆歓迎要件
+        # 【歓迎…】（【歓迎（WANT）】など）
+        # ■歓迎スキル
+        # 【WANT】
+        # 【優遇スキル】（パターン１の後半を歓迎扱い）
+        want_pattern = re.search(
+            r"(?:"
+              r"◆歓.*?"
+              r"|【歓.*?】"
+              r"|■歓.*?"
+              r"|【優遇.*?】"
+              r"|【WANT.*?】"
+            r")"
+            r"([\s\S]*?)(?=◆|【|■|$)",
+            raw_text
+        )
+
+        must = must_pattern.group(1).strip() if must_pattern else ""
+        want = want_pattern.group(1).strip() if want_pattern else ""
+        return must, want
+
     def get_detailed_info(self, job_url, job_data):
         """
         求人詳細ページにアクセスして追加情報を取得する
@@ -752,6 +801,22 @@ class GreenScraper:
                 application_qualification = self.get_field_value("応募資格")
                 if application_qualification:
                     job_data["応募資格"] = application_qualification
+                    # 応募資格テキストを解析して必須資格と歓迎資格に分割
+                    must, want = self.parse_requirements(application_qualification)
+                    if must:
+                        job_data["必須資格"] = must
+                    # 必須資格が抽出できなかった場合はページ上のフィールドをフォールバック取得
+                    elif self.get_field_value("必須資格"):
+                        job_data["必須資格"] = self.get_field_value("必須資格")
+                    if want:
+                        job_data["歓迎資格"] = want
+                    # 歓迎資格が抽出できなかった場合はページ上のフィールドをフォールバック取得
+                    elif self.get_field_value("歓迎資格"):
+                        job_data["歓迎資格"] = self.get_field_value("歓迎資格")
+                
+                hope_degree = self.get_field_value("希望度")
+                if hope_degree:
+                    job_data["希望度"] = hope_degree
                 
                 try:
                     # 指定されたXPathを使用して利用言語を取得
